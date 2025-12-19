@@ -2,7 +2,7 @@
 Celestium 2.0 - Simulation Package
 """
 
-from .physics import (
+from simulation.physics import (
     GravityModel,
     MU_EARTH,
     MU_MOON,
