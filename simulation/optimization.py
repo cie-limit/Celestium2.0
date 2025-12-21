@@ -211,21 +211,16 @@ def generate_pure_hohmann(moon_pos, mode, vehicle, name, color, base_desc):
     moon_dist = np.linalg.norm(moon_pos)
     moon_dir = moon_pos / moon_dist
     
-    # 호만 전이 공식
     r1 = PARKING_RADIUS
     r2 = moon_dist
     
-    # 전이 궤도 장반경
     a_transfer = (r1 + r2) / 2
     
-    # 출발점 속도 (vis-viva)
     v_circular = np.sqrt(MU_EARTH / r1)
     v_periapsis = np.sqrt(MU_EARTH * (2/r1 - 1/a_transfer))
     
-    # 기본 delta-v
     base_delta_v = v_periapsis - v_circular
     
-    # 모드별 delta-v 조정 (연료 효율 순서: fuel_opt < hohmann < balanced < fast)
     if mode == "fast":
         delta_v = base_delta_v * 1.25
         tof_hours = 45
@@ -233,18 +228,16 @@ def generate_pure_hohmann(moon_pos, mode, vehicle, name, color, base_desc):
         delta_v = base_delta_v * 1.10
         tof_hours = 55
     elif mode == "fuel_opt":
-        delta_v = base_delta_v * 0.95
-        tof_hours = 120
-    else:  # hohmann
+        delta_v = base_delta_v * 0.98
+        tof_hours = 75
+    else:
         delta_v = base_delta_v * 1.0
-        tof_hours = 90
+        tof_hours = 72
     
     v_launch = v_circular + delta_v
     
-    # 출발 위치와 속도
     start_pos = -moon_dir * PARKING_RADIUS
     
-    # 접선 방향 속도
     tangent = np.cross(np.array([0, 0, 1]), -moon_dir)
     if np.linalg.norm(tangent) < 0.1:
         tangent = np.cross(np.array([0, 1, 0]), -moon_dir)
@@ -255,18 +248,15 @@ def generate_pure_hohmann(moon_pos, mode, vehicle, name, color, base_desc):
     
     start_vel = tangent * v_launch
     
-    # 시뮬레이션
     sim_time = tof_hours * 3600 * 1.5
     positions = simulate_trajectory(start_pos, start_vel, moon_pos, sim_time, dt=300)
     
     if len(positions) < 10:
         return create_fallback(moon_pos, mode, vehicle)
     
-    # 달까지 최소 거리
     dists = np.linalg.norm(positions - moon_pos, axis=1)
     min_dist = np.min(dists)
     
-    # 연료 계산
     delta_v_ms = delta_v * 1000
     fuel_mass = vehicle.mass * (np.exp(delta_v_ms / (vehicle.isp * G0 * 1000)) - 1)
     
@@ -331,20 +321,22 @@ def generate_trajectory(moon_pos, mode, vehicle):
         base_desc = "Optimal time-fuel balance"
         
     elif mode == "fuel_opt":
-        # 연료 최적화: 가장 긴 시간, 가장 적은 연료
-        tof_hours = 120
+        # 연료 최적화: Hohmann과 비슷하지만 약간 다른 각도
+        tof_hours = 75
         
-        start_dir = -moon_dir
-        end_offset = moon_dir * (R_MOON * 5)
+        # 달 반대편에서 약간만 회전 (Hohmann과 비슷하게)
+        start_dir = rotate_around_axis(-moon_dir, up, 15)
+        start_dir = rotate_around_axis(start_dir, moon_dir, -10)
+        end_offset = -moon_dir * (R_MOON * 3)  # 달 정면 도착
         
         name, color = "Fuel Optimized", "#3388FF"
         base_desc = "Maximum fuel efficiency"
         
     elif mode == "hohmann":
-        tof_hours = 90
+        tof_hours = 72
         
         start_dir = -moon_dir
-        end_offset = moon_dir * (R_MOON * 8)
+        end_offset = moon_dir * (R_MOON * 5)
         
         name, color = "Standard Hohmann", "#00FF00"
         base_desc = "Classical transfer orbit"
@@ -366,7 +358,7 @@ def generate_trajectory(moon_pos, mode, vehicle):
     
     # 실패시 다른 시간 시도
     if v1 is None:
-        for alt_hours in [50, 60, 70, 80, 100, 110, 130]:
+        for alt_hours in [50, 60, 70, 80, 65, 55]:
             v1, v2 = lambert_solver(start_pos, end_pos, alt_hours * 3600)
             if v1 is not None:
                 tof = alt_hours * 3600
@@ -382,7 +374,7 @@ def generate_trajectory(moon_pos, mode, vehicle):
     elif mode == "balanced":
         sim_time = tof * 1.5
     elif mode == "fuel_opt":
-        sim_time = tof * 1.4
+        sim_time = tof * 1.5
     else:
         sim_time = tof * 1.4
     
@@ -395,18 +387,18 @@ def generate_trajectory(moon_pos, mode, vehicle):
     dists = np.linalg.norm(positions - moon_pos, axis=1)
     min_dist = np.min(dists)
     
-    # ΔV 계산 - 모드별 조정
+    # ΔV 계산
     v_circular = np.sqrt(MU_EARTH / PARKING_RADIUS)
     raw_delta_v = abs(np.linalg.norm(v1) - v_circular)
     
     # 연료 효율 순서 보장: fuel_opt < hohmann < balanced < fast
     if mode == "fast":
-        delta_v_ms = raw_delta_v * 1000 * 1.15  # 15% 추가
+        delta_v_ms = raw_delta_v * 1000 * 1.15
     elif mode == "balanced":
-        delta_v_ms = raw_delta_v * 1000 * 1.05  # 5% 추가
+        delta_v_ms = raw_delta_v * 1000 * 1.05
     elif mode == "fuel_opt":
-        delta_v_ms = raw_delta_v * 1000 * 0.90  # 10% 절감
-    else:  # hohmann
+        delta_v_ms = raw_delta_v * 1000 * 0.92
+    else:
         delta_v_ms = raw_delta_v * 1000
     
     # 연료 계산
@@ -436,7 +428,7 @@ def generate_trajectory(moon_pos, mode, vehicle):
     }
 
 
-# ========== Free Return (유지) ==========
+# ========== Free Return ==========
 def generate_free_return(moon_pos, vehicle):
     """자유 귀환 궤도"""
     
@@ -542,35 +534,33 @@ def generate_trajectories(launch_date, vehicle):
     return results
 
 
-# ========== 폴백 (vehicle 인자 추가) ==========
+# ========== 폴백 ==========
 def create_fallback(moon_pos, mode, vehicle):
     """폴백 - 각 모드별 다른 타원 + 실제 연료 계산"""
     moon_dist = np.linalg.norm(moon_pos)
     moon_dir = moon_pos / moon_dist
     
-    # 모드별 다른 타원 모양
     if mode == "fast":
         eccentricity = 0.2
         angle_offset = 30
-        delta_v_ms = 4100  # m/s
+        delta_v_ms = 4100
     elif mode == "balanced":
         eccentricity = 0.35
         angle_offset = 15
         delta_v_ms = 3500
     elif mode == "fuel_opt":
-        eccentricity = 0.45
-        angle_offset = -15
-        delta_v_ms = 2900  # 가장 적음
+        eccentricity = 0.48
+        angle_offset = 8
+        delta_v_ms = 3000
     elif mode == "hohmann":
-        eccentricity = 0.5
+        eccentricity = 0.45
         angle_offset = 0
         delta_v_ms = 3150
-    else:  # free_return
+    else:
         eccentricity = 0.4
         angle_offset = 0
         delta_v_ms = 3300
     
-    # 실제 연료 계산
     fuel_mass = vehicle.mass * (np.exp(delta_v_ms / (vehicle.isp * G0 * 1000)) - 1)
     
     t = np.linspace(0, np.pi, 200)
@@ -583,7 +573,6 @@ def create_fallback(moon_pos, mode, vehicle):
     
     positions = np.column_stack([x, y, z])
     
-    # 달 방향으로 회전 + 오프셋
     up = np.array([0, 0, 1])
     rotated_dir = rotate_around_axis(moon_dir, up, angle_offset)
     
@@ -602,10 +591,10 @@ def create_fallback(moon_pos, mode, vehicle):
         positions = positions @ R.T
     
     info = {
-        "fast": ("High Speed Injection", "#FF00FF", 35),
+        "fast": ("High Speed Injection", "#FF00FF", 45),
         "balanced": ("Balanced Profile", "#FFA500", 55),
-        "fuel_opt": ("Fuel Optimized", "#3388FF", 120),
-        "hohmann": ("Standard Hohmann", "#00FF00", 90),
+        "fuel_opt": ("Fuel Optimized", "#3388FF", 75),
+        "hohmann": ("Standard Hohmann", "#00FF00", 72),
         "free_return": ("Free Return", "#00FFFF", 144)
     }
     
